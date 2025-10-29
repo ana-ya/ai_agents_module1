@@ -71,7 +71,7 @@ class LangChain1Agent:
         def search_web(query: str) -> str:
             """Пошук інформації в інтернеті"""
             try:
-                from duckduckgo_search import DDGS
+                from ddgs import DDGS
                 with DDGS() as ddgs:
                     results = list(ddgs.text(query, max_results=3))
                     if results:
