@@ -16,9 +16,10 @@ langgraph>=0.2.0  # Для мультиагентних систем
 # ===========================
 # Multi-agent frameworks - РОБОЧІ версії
 # ===========================
-crewai==0.203.1
-crewai-tools==0.14.0
+crewai==1.2.1
+crewai-tools==1.2.1
 smolagents==1.22.0
+chromadb~=1.1.0
 
 # ===========================
 # LLM providers - РОБОЧІ версії
@@ -40,7 +41,7 @@ numpy>=1.26.0
 # ===========================
 # Utilities
 # ===========================
-python-dotenv==1.0.1
+python-dotenv>=1.1.1
 requests>=2.32.0
 beautifulsoup4>=4.12.0
 tenacity>=9.0.0
