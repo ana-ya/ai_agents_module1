@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src import setup_logging, get_logger, LoggerMixin
 from src.exceptions import APIKeyError, ModelError, ToolError, FileOperationError, ResearchError
 from src.error_handling import retry_on_error
-
+from src.topic_validation import _validate_topic
 # Setup logging
 logger = setup_logging(level=os.getenv("LOG_LEVEL", "INFO"))
 
@@ -49,10 +49,13 @@ class LangChain1Agent(LoggerMixin):
     Використовує нову архітектуру LCEL (LangChain Expression Language)
     """
     
-    def __init__(self, api_key: str = None):
+    def __init__(self, api_key: str = None, model: str = None, temperature: float = None):
         """Ініціалізація агента"""
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        
+        self.model = model or os.getenv("OPENAI_MODEL", "gpt-4")
+        self.temperature = temperature or float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
+        self.logger.info(f"Ініціалізація агента: model={self.model}, temperature={self.temperature}")
+
         if not self.api_key:
             self.logger.warning("OPENAI_API_KEY не знайдено! AI аналіз буде недоступний")
             self.llm = None
@@ -60,8 +63,8 @@ class LangChain1Agent(LoggerMixin):
             try:
                 # Створення LLM для LangChain 1.0
                 self.llm = ChatOpenAI(
-                    model="gpt-4",
-                    temperature=0.7,
+                    model=self.model,
+                    temperature=self.temperature,
                     api_key=self.api_key
                 )
                 self.logger.info("ChatOpenAI LLM створено успішно")
@@ -188,20 +191,12 @@ class LangChain1Agent(LoggerMixin):
         
         return chains
     
-    async def research_async(self, topic: str) -> dict:
-        """Асинхронне дослідження (нова функція LangChain 1.0)"""
-        # LangChain 1.0 підтримує async операції
-        pass
-    
     def research(self, topic: str) -> dict:
         """Синхронне дослідження"""
-        if not topic or not topic.strip():
-            raise ResearchError("Тема дослідження не може бути порожньою")
-        
-        # Validate topic length
-        if len(topic) > 500:
-            raise ResearchError("Тема дослідження занадто довга (максимум 500 символів)")
-        
+        self.logger.info(f"Валідація topic: {topic}")
+        topic = _validate_topic(topic)
+        self.logger.info(f"Тема після валідації: {topic}")
+
         self.logger.info(f"Початок дослідження теми: {topic}")
         results = {"topic": topic, "timestamp": datetime.now().isoformat()}
         
@@ -210,9 +205,13 @@ class LangChain1Agent(LoggerMixin):
             self.logger.info("Крок 1: Пошук інформації...")
             try:
                 search_results = self.tools["search_web"](topic)
+            except (ToolError, ImportError, ConnectionError) as e:
+                self.logger.warning(f"Пошук не вдався: {e}, використовую демо-результати")
+                search_results = self._get_demo_search_results(topic)
             except Exception as e:
-                self.logger.warning(f"Помилка пошуку: {e}, використовую демо-результати")
-                search_results = f"Результати пошуку недоступні: {e}"
+                self.logger.error(f"Критична помилка пошуку: {e}", exc_info=True)
+                raise ResearchError(f"Не вдалося виконати пошук: {e}") from e  # More specific error
+
             results["search"] = search_results
             self.logger.info("Крок 1 завершено: пошук інформації")
             
