@@ -132,7 +132,7 @@ class SimpleCrewAIAgent:
             tools=self.tools,
             llm=self.llm,
             verbose=True,  # Показувати процес роботи
-            max_iter=5,    # Максимум 5 ітерацій
+            max_iter=1,    # Максимум 5 ітерацій
             memory=True    # Використовувати пам'ять
         )
     

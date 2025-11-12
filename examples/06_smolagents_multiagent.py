@@ -8,7 +8,8 @@ import os
 import json
 from datetime import datetime
 from typing import Dict, List, Any
-from smolagents import CodeAgent, tool, HfApiModel, OpenAIServerModel
+from smolagents import CodeAgent, tool, ApiModel, OpenAIServerModel
+from smolagents.monitoring import LogLevel
 
 # Завантаження .env
 try:
@@ -156,7 +157,7 @@ class SmolAgentsMultiAgentSystem:
                     )
                     print("[OK] OpenAI модель створено")
                 elif model_type == "hf":
-                    self.model = HfApiModel(
+                    self.model = ApiModel(
                         model_id="meta-llama/Llama-3.3-70B-Instruct",
                         token=os.getenv("HF_TOKEN")
                     )
@@ -178,17 +179,19 @@ class SmolAgentsMultiAgentSystem:
         if not self.model:
             return None
 
-        return CodeAgent(
-            tools=self.tools,
-            model=self.model,
-            max_steps=5,
-            verbose=True,
-            system_prompt="""Ви - професійний дослідник з 15-річним стажем.
+        instructions_text = """Ви - професійний дослідник з 15-річним стажем.
             Спеціалізуєтесь на освітніх технологіях та штучному інтелекті.
             Ваша задача - знайти найактуальнішу інформацію.
 
             Використовуйте search_web для пошуку інформації.
             Зберігайте результати через save_memory."""
+
+        return CodeAgent(
+            tools=self.tools,
+            model=self.model,
+            max_steps=2,
+            verbosity_level=LogLevel.DEBUG,
+            instructions=instructions_text
         )
 
     def _create_analyst(self):
@@ -196,17 +199,19 @@ class SmolAgentsMultiAgentSystem:
         if not self.model:
             return None
 
-        return CodeAgent(
-            tools=self.tools,
-            model=self.model,
-            max_steps=5,
-            verbose=True,
-            system_prompt="""Ви - експерт з data science та аналізу трендів.
+        instructions_text="""Ви - експерт з data science та аналізу трендів.
             Маєте унікальну здатність знаходити приховані патерни в даних.
             Ваша задача - проаналізувати зібрану інформацію.
 
             Використовуйте analyze_text для аналізу даних.
             Виявляйте ключові інсайти та тренди."""
+
+        return CodeAgent(
+            tools=self.tools,
+            model=self.model,
+            max_steps=2,
+            verbosity_level=LogLevel.DEBUG,
+            instructions=instructions_text
         )
 
     def _create_reporter(self):
@@ -214,16 +219,18 @@ class SmolAgentsMultiAgentSystem:
         if not self.model:
             return None
 
-        return CodeAgent(
-            tools=self.tools,
-            model=self.model,
-            max_steps=5,
-            verbose=True,
-            system_prompt="""Ви - професійний технічний письменник.
+        instructions_text="""Ви - професійний технічний письменник.
             Вмієте перетворювати складні технічні дані на зрозумілі звіти.
             Ваша задача - створити структурований звіт.
 
             Створюйте чіткі, зрозумілі звіти для широкої аудиторії."""
+
+        return CodeAgent(
+            tools=self.tools,
+            model=self.model,
+            max_steps=2,
+            verbosity_level=LogLevel.DEBUG,
+            instructions=instructions_text
         )
 
     def run_sequential(self, topic: str) -> Dict[str, Any]:
@@ -242,17 +249,19 @@ class SmolAgentsMultiAgentSystem:
         if not self.model:
             return self._demo_mode_sequential(topic)
 
+        instructions_text="""Ви - універсальний AI агент з трьома ролями.
+            Виконуйте задачу в три етапи:
+            1. RESEARCHER: Знайдіть інформацію
+            2. ANALYST: Проаналізуйте дані
+            3. REPORTER: Створіть звіт"""
+
         # Створюємо єдиного агента
         agent = CodeAgent(
             tools=self.tools,
             model=self.model,
             max_steps=15,
-            verbose=True,
-            system_prompt="""Ви - універсальний AI агент з трьома ролями.
-            Виконуйте задачу в три етапи:
-            1. RESEARCHER: Знайдіть інформацію
-            2. ANALYST: Проаналізуйте дані
-            3. REPORTER: Створіть звіт"""
+            verbosity_level=LogLevel.DEBUG,
+            instructions=instructions_text
         )
 
         # Формуємо комплексну задачу
