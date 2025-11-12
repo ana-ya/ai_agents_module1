@@ -1,39 +1,49 @@
 """
 Модуль 1: AI Research Agent на LangChain 1.0
 """
-# -*- coding: utf-8 -*-
 
 import os
 import sys
 from datetime import datetime
 import json
 from typing import Dict, List, Any
+from pathlib import Path
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Setup logging first
+from src import setup_logging, get_logger, LoggerMixin
+from src.exceptions import APIKeyError, ModelError, ToolError, FileOperationError, ResearchError
+from src.error_handling import retry_on_error
+
+# Setup logging
+logger = setup_logging(level=os.getenv("LOG_LEVEL", "INFO"))
 
 # Завантаження .env
 try:
     from dotenv import load_dotenv
     load_dotenv()
-    print(".env файл завантажено")
-except:
-    print("python-dotenv не встановлено")
+    logger.info(".env файл завантажено")
+except ImportError:
+    logger.warning("python-dotenv не встановлено, використовуються змінні оточення")
 
 # Імпорти для LangChain 1.0
 try:
-    # from langchain.chat_models import ChatOpenAI
     from langchain_openai import ChatOpenAI
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
-    print("LangChain 1.0 компоненти завантажено")
+    logger.info("LangChain 1.0 компоненти завантажено")
 except ImportError as e:
-    print(f"Помилка імпорту LangChain: {e}")
-    print("Встановіть: pip install langchain-openai langchain-core")
+    logger.error(f"Помилка імпорту LangChain: {e}")
+    logger.error("Встановіть: pip install langchain-openai langchain-core")
     sys.exit(1)
 
 # ===========================
 # LANGCHAIN 1.0 AGENT
 # ===========================
 
-class LangChain1Agent:
+class LangChain1Agent(LoggerMixin):
     """
     Агент-дослідник на LangChain 1.0
     Використовує нову архітектуру LCEL (LangChain Expression Language)
@@ -44,7 +54,7 @@ class LangChain1Agent:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         
         if not self.api_key:
-            print("OPENAI_API_KEY не знайдено!")
+            self.logger.warning("OPENAI_API_KEY не знайдено! AI аналіз буде недоступний")
             self.llm = None
         else:
             try:
@@ -54,20 +64,23 @@ class LangChain1Agent:
                     temperature=0.7,
                     api_key=self.api_key
                 )
-                print(f" ChatOpenAI LLM створено")
+                self.logger.info("ChatOpenAI LLM створено успішно")
             except Exception as e:
-                print(f" Помилка створення LLM: {e}")
-                self.llm = None
+                self.logger.error(f"Помилка створення LLM: {e}", exc_info=True)
+                raise ModelError(f"Не вдалося створити LLM: {e}") from e
         
         # Створення інструментів
         self.tools = self._create_tools()
+        self.logger.info(f"Створено {len(self.tools)} інструментів")
         
         # Створення ланцюгів (chains) - нова архітектура LangChain 1.0
         self.chains = self._create_chains()
+        self.logger.info(f"Створено {len(self.chains)} ланцюгів")
     
     def _create_tools(self) -> Dict:
         """Створення інструментів для дослідження"""
         
+        @retry_on_error(max_retries=2, delay=1.0)
         def search_web(query: str) -> str:
             """Пошук інформації в інтернеті"""
             try:
@@ -81,8 +94,11 @@ class LangChain1Agent:
                             output += f"   {r.get('body', '')[:200]}...\n"
                             output += f"   {r.get('href', '')}\n\n"
                         return output
+            except ImportError:
+                # Fallback to demo results if ddgs not available
+                pass
             except Exception as e:
-                print(f" Помилка пошуку: {e}")
+                raise ToolError(f"Помилка веб-пошуку: {e}") from e
             
             # Демо результат
             return f"""
@@ -125,17 +141,22 @@ class LangChain1Agent:
             """Збереження в пам'ять"""
             filename = "langchain1_memory.json"
             try:
-                with open(filename, 'r') as f:
+                with open(filename, 'r', encoding='utf-8') as f:
                     memory = json.load(f)
-            except:
+            except FileNotFoundError:
+                memory = {"sessions": []}
+            except json.JSONDecodeError:
+                # If JSON is corrupted, start fresh
                 memory = {"sessions": []}
             
             memory["sessions"].append(data)
             
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(memory, f, ensure_ascii=False, indent=2)
-            
-            return f"Збережено в {filename}"
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(memory, f, ensure_ascii=False, indent=2)
+                return f"Збережено в {filename}"
+            except Exception as e:
+                raise FileOperationError(f"Не вдалося зберегти дані: {e}") from e
         
         return {
             "search_web": search_web,
@@ -174,57 +195,81 @@ class LangChain1Agent:
     
     def research(self, topic: str) -> dict:
         """Синхронне дослідження"""
-        print(f"\nLangChain 1.0 Agent: Дослідження '{topic}'")
-        print("=" * 60)
+        if not topic or not topic.strip():
+            raise ResearchError("Тема дослідження не може бути порожньою")
         
+        # Validate topic length
+        if len(topic) > 500:
+            raise ResearchError("Тема дослідження занадто довга (максимум 500 символів)")
+        
+        self.logger.info(f"Початок дослідження теми: {topic}")
         results = {"topic": topic, "timestamp": datetime.now().isoformat()}
         
-        # Крок 1: Пошук
-        print("Крок 1: Пошук інформації...")
-        search_results = self.tools["search_web"](topic)
-        results["search"] = search_results
-        print("   Завершено")
-        
-        # Крок 2: Аналіз
-        print("Крок 2: Аналіз даних...")
-        analysis = self.tools["analyze_data"](search_results)
-        results["analysis"] = analysis
-        print("   Завершено")
-        
-        # Крок 3: AI обробка (якщо доступна)
-        if self.llm and "research" in self.chains:
-            print("Крок 3: AI аналіз...")
+        try:
+            # Крок 1: Пошук
+            self.logger.info("Крок 1: Пошук інформації...")
             try:
-                ai_analysis = self.chains["research"].invoke({
-                    "topic": topic,
-                    "data": search_results
-                })
-                results["ai_analysis"] = ai_analysis
-                print("   Завершено")
+                search_results = self.tools["search_web"](topic)
             except Exception as e:
-                print(f"   Помилка AI: {e}")
-                results["ai_analysis"] = "AI аналіз недоступний"
-        else:
-            print(" Крок 3: Демо аналіз...")
-            results["ai_analysis"] = self._demo_analysis(topic)
-            print("   Завершено")
-        
-        # Крок 4: Збереження
-        print(" Крок 4: Збереження результатів...")
-        save_result = self.tools["save_to_memory"](results)
-        print(f"   {save_result}")
-        
-        # Створення звіту
-        report = self._create_report(results)
-        results["report"] = report
-        
-        # Збереження фінального звіту
-        with open("langchain1_report.json", "w", encoding="utf-8") as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
-        
-        print("\nПовний звіт: langchain1_report.json")
-        
-        return results
+                self.logger.warning(f"Помилка пошуку: {e}, використовую демо-результати")
+                search_results = f"Результати пошуку недоступні: {e}"
+            results["search"] = search_results
+            self.logger.info("Крок 1 завершено: пошук інформації")
+            
+            # Крок 2: Аналіз
+            self.logger.info("Крок 2: Аналіз даних...")
+            try:
+                analysis = self.tools["analyze_data"](search_results)
+            except Exception as e:
+                self.logger.warning(f"Помилка аналізу: {e}")
+                analysis = "Аналіз даних недоступний"
+            results["analysis"] = analysis
+            self.logger.info("Крок 2 завершено: аналіз даних")
+            
+            # Крок 3: AI обробка (якщо доступна)
+            if self.llm and "research" in self.chains:
+                self.logger.info("Крок 3: AI аналіз...")
+                try:
+                    ai_analysis = self.chains["research"].invoke({
+                        "topic": topic,
+                        "data": search_results
+                    })
+                    results["ai_analysis"] = ai_analysis
+                    self.logger.info("Крок 3 завершено: AI аналіз")
+                except Exception as e:
+                    self.logger.error(f"Помилка AI аналізу: {e}", exc_info=True)
+                    results["ai_analysis"] = "AI аналіз недоступний"
+            else:
+                self.logger.info("Крок 3: Демо аналіз (LLM недоступний)...")
+                results["ai_analysis"] = self._demo_analysis(topic)
+                self.logger.info("Крок 3 завершено: демо аналіз")
+            
+            # Крок 4: Збереження
+            self.logger.info("Крок 4: Збереження результатів...")
+            try:
+                save_result = self.tools["save_to_memory"](results)
+                self.logger.info(f"Крок 4 завершено: {save_result}")
+            except Exception as e:
+                self.logger.warning(f"Помилка збереження: {e}")
+            
+            # Створення звіту
+            report = self._create_report(results)
+            results["report"] = report
+            
+            # Збереження фінального звіту
+            try:
+                with open("langchain1_report.json", "w", encoding="utf-8") as f:
+                    json.dump(results, f, ensure_ascii=False, indent=2)
+                self.logger.info("Звіт збережено: langchain1_report.json")
+            except Exception as e:
+                self.logger.error(f"Помилка збереження звіту: {e}", exc_info=True)
+            
+            self.logger.info("Дослідження завершено успішно")
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"Помилка під час дослідження: {e}", exc_info=True)
+            raise ResearchError(f"Помилка дослідження: {e}") from e
     
     def _demo_analysis(self, topic: str) -> str:
         """Демо аналіз для випадків без API"""
@@ -288,65 +333,69 @@ AI АНАЛІТИКА:
 def main():
     """Запуск LangChain 1.0 агента"""
     
-    print("""
-╔══════════════════════════════════════════════════════════════╗
-║            LANGCHAIN 1.0 RESEARCH AGENT                      ║
-║                Найновіші версії пакеті                       ║
-╚══════════════════════════════════════════════════════════════╝
-    """)
+    logger.info("=" * 60)
+    logger.info("LANGCHAIN 1.0 RESEARCH AGENT")
+    logger.info("=" * 60)
     
     # Перевірка версій
-    print("Версії пакетів:")
+    logger.info("Перевірка версій пакетів:")
     try:
         import langchain
-        print(f"   LangChain: {langchain.__version__}")
-    except:
-        print(f"   LangChain: не встановлено")
+        logger.info(f"   LangChain: {langchain.__version__}")
+    except Exception as e:
+        logger.warning(f"   LangChain: не встановлено ({e})")
     
     try:
         import langchain_openai
-        print(f"   LangChain-OpenAI: встановлено")
-    except:
-        print(f"   LangChain-OpenAI: не встановлено")
+        logger.info("   LangChain-OpenAI: встановлено")
+    except Exception as e:
+        logger.warning(f"   LangChain-OpenAI: не встановлено ({e})")
     
     try:
         import openai
         version = getattr(openai, '__version__', 'версія невідома')
-        print(f"   OpenAI: {version}")
-        print(f"   OpenAI: {openai.__version__}")
-    except:
-        print(f"   OpenAI: не встановлено")
+        logger.info(f"   OpenAI: {version}")
+    except Exception as e:
+        logger.warning(f"   OpenAI: не встановлено ({e})")
     
-    # считуємо API ключ
+    # Перевірка API ключа
     api_key = os.getenv("OPENAI_API_KEY")
     if api_key:
-        print(f"   API ключ: api_key")
+        logger.info("   API ключ: знайдено")
     else:
-        print(f"   API ключ: не знайдено")
+        logger.warning("   API ключ: не знайдено")
     
-    print("\n" + "=" * 60)
+    logger.info("=" * 60)
     
-    # Створення агента
-    agent = LangChain1Agent(api_key)
-    
-    # Дослідження
-    topic = "Штучний інтелект в освіті 2025: найновіші тренди"
-    result = agent.research(topic)
-    
-    # Виведення звіту
-    print("\n" + "=" * 60)
-    print(result["report"])
-    
-    print("\nГотово! Перегляньте файли:")
-    print("   - langchain1_report.json - повні дані")
-    print("   - langchain1_memory.json - збережена історія")
+    try:
+        # Створення агента
+        agent = LangChain1Agent(api_key)
+        
+        # Дослідження
+        topic = "Штучний інтелект в освіті 2025: найновіші тренди"
+        result = agent.research(topic)
+        
+        # Виведення звіту
+        if result and "report" in result:
+            logger.info("=" * 60)
+            logger.info("ЗВІТ СТВОРЕНО")
+            logger.info("=" * 60)
+            
+        logger.info("Дослідження завершено. Перегляньте файли:")
+        logger.info("   - langchain1_report.json - повні дані")
+        logger.info("   - langchain1_memory.json - збережена історія")
+        logger.info("   - logs/ai_agents.log - логи виконання")
+        
+    except Exception as e:
+        logger.error(f"Критична помилка: {e}", exc_info=True)
+        raise
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\nПрограму перервано")
+        logger.warning("Програму перервано користувачем")
+        sys.exit(0)
     except Exception as e:
-        print(f"\nКритична помилка: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.critical(f"Критична помилка: {e}", exc_info=True)
+        sys.exit(1)
