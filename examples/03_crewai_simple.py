@@ -7,6 +7,15 @@ import os
 import json
 from datetime import datetime
 from typing import Dict, List, Any
+from crewai import LLM
+
+# Завантажуємо змінні середовища з .env файлу
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv не обов'язковий, можна використовувати системні змінні
+
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import tool
 
@@ -21,9 +30,27 @@ class SimpleCrewAIAgent:
     
     def __init__(self):
         """Ініціалізація агента"""
+        # Перевірка API ключа перед створенням агента
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OPENAI_API_KEY не знайдено! "
+                "Додайте ключ до .env файлу або експортуйте змінну середовища. "
+                "Приклад: export OPENAI_API_KEY='sk-...' або створіть .env з рядком OPENAI_API_KEY=sk-..."
+            )
+        
         # CrewAI автоматично використає OPENAI_API_KEY з середовища
+        self.llm = self._create_llm(api_key)
         self.tools = self._create_tools()
         self.agent = self._create_agent()
+    
+    def _create_llm(self, api_key: str) -> LLM:
+        """Створення LLM"""
+        return LLM(
+            model="gpt-5-nano",
+            api_key=api_key,
+            temperature=1
+        )
     
     def _create_tools(self) -> List:
         """Створення інструментів для дослідження"""
@@ -103,6 +130,7 @@ class SimpleCrewAIAgent:
             Ваше завдання - знайти актуальну інформацію, проаналізувати її
             та створити корисний звіт для викладачів та студентів.""",
             tools=self.tools,
+            llm=self.llm,
             verbose=True,  # Показувати процес роботи
             max_iter=1,    # Максимум 5 ітерацій
             memory=True    # Використовувати пам'ять
@@ -176,10 +204,28 @@ class MultiAgentTeam:
     
     def __init__(self):
         """Створюємо команду агентів"""
+        # Перевірка API ключа перед створенням агентів
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OPENAI_API_KEY не знайдено! "
+                "Додайте ключ до .env файлу або експортуйте змінну середовища. "
+                "Приклад: export OPENAI_API_KEY='sk-...' або створіть .env з рядком OPENAI_API_KEY=sk-..."
+            )
+        
+        self.llm = self._create_llm(api_key)
         self.tools = self._create_tools()
         self.researcher = self._create_researcher()
         self.analyst = self._create_analyst()
         self.writer = self._create_writer()
+
+    def _create_llm(self, api_key: str) -> LLM:
+        """Створення LLM"""
+        return LLM(
+            model="gpt-5-nano",
+            api_key=api_key,
+            temperature=1
+        )
     
     def _create_tools(self) -> List:
         """Спільні інструменти для всіх агентів"""
@@ -203,6 +249,7 @@ class MultiAgentTeam:
             goal='Знайти актуальну інформацію',
             backstory='Експерт з пошуку даних',
             tools=self.tools,
+            llm=self.llm,
             verbose=True
         )
     
@@ -213,6 +260,7 @@ class MultiAgentTeam:
             goal='Проаналізувати зібрані дані',
             backstory='Експерт з аналізу даних',
             tools=self.tools,
+            llm=self.llm,
             verbose=True
         )
     
@@ -222,6 +270,7 @@ class MultiAgentTeam:
             role='Письменник',
             goal='Створити зрозумілий звіт',
             backstory='Експерт з написання звітів',
+            llm=self.llm,
             verbose=True
         )
     
@@ -285,8 +334,15 @@ def main():
     if api_key:
         print(f"[OK] API ключ знайдено")
     else:
-        print("[WARNING] Додайте OPENAI_API_KEY в .env файл")
-        print("   CrewAI спробує працювати в обмеженому режимі")
+        print("[ERROR] OPENAI_API_KEY не знайдено!")
+        print("\nВаріанти рішення:")
+        print("1. Створіть .env файл в корені проекту з рядком:")
+        print("   OPENAI_API_KEY=sk-your-key-here")
+        print("\n2. Або експортуйте змінну середовища:")
+        print("   export OPENAI_API_KEY='sk-your-key-here'")
+        print("\n3. Або встановіть в Python коді:")
+        print("   os.environ['OPENAI_API_KEY'] = 'sk-your-key-here'")
+        return
     
     # 1. Простий агент
     print("\n1. ОДИН АГЕНТ:")
@@ -308,7 +364,7 @@ def main():
     print("\n" + "=" * 60)
     print("Підказки:")
     print("- Перегляньте crewai_report_*.json для повних результатів")
-    print("- Додайте OPENAI_API_KEY для повного функціоналу")
+    print("- Всі функції CrewAI вимагають OPENAI_API_KEY")
     print("- Спробуйте змінити ролі та завдання агентів")
 
 if __name__ == "__main__":
