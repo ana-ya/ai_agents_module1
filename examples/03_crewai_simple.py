@@ -32,7 +32,7 @@ class SimpleCrewAIAgent:
         def search_web(query: str) -> str:
             """Пошук інформації в інтернеті"""
             try:
-                from duckduckgo_search import DDGS
+                from ddgs import DDGS
                 results_text = f"Результати пошуку для '{query}':\n\n"
                 
                 with DDGS() as ddgs:
@@ -104,7 +104,7 @@ class SimpleCrewAIAgent:
             та створити корисний звіт для викладачів та студентів.""",
             tools=self.tools,
             verbose=True,  # Показувати процес роботи
-            max_iter=5,    # Максимум 5 ітерацій
+            max_iter=1,    # Максимум 5 ітерацій
             memory=True    # Використовувати пам'ять
         )
     
