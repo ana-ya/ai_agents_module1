@@ -5,7 +5,7 @@
 
 import os
 from typing import Dict, List, Any, Optional
-from smolagents import CodeAgent, tool, HfApiModel, OpenAIServerModel
+from smolagents import CodeAgent, tool, ApiModel, OpenAIServerModel
 from datetime import datetime
 import json
 import requests
@@ -42,9 +42,9 @@ class SmolAgentsResearchAgent:
                 model_id="gpt-4",
                 api_key=api_key or os.getenv("OPENAI_API_KEY")
             )
-        else model_type == "hf":
+        elif model_type == "hf":
             # Використання моделі з Hugging Face Hub
-            return HfApiModel(
+            return ApiModel(
                 model_id="meta-llama/Llama-3.3-70B-Instruct",
                 token=os.getenv("HF_TOKEN")
             )
@@ -179,14 +179,15 @@ class SmolAgentsResearchAgent:
         # SmolAgents підтримує два типи агентів
         # CodeAgent - генерує Python код для вирішення задач
         
+        instructions_text = """Ви - професійний агент-дослідник. 
+            Використовуйте доступні інструменти для збору та аналізу інформації.
+            Завжди перевіряйте факти та надавайте структуровані висновки."""
+        
         agent = CodeAgent(
             tools=self.tools,
             model=self.model,
             max_steps=5,
-            verbose=True,
-            system_prompt="""Ви - професійний агент-дослідник. 
-            Використовуйте доступні інструменти для збору та аналізу інформації.
-            Завжди перевіряйте факти та надавайте структуровані висновки."""
+            instructions=instructions_text
         )
         
         return agent
