@@ -9,6 +9,11 @@ import json
 from typing import Dict, List, Any
 from pathlib import Path
 
+from pathlib import Path
+from datetime import datetime
+from collections import Counter
+import re
+
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -18,6 +23,8 @@ from src.exceptions import APIKeyError, ModelError, ToolError, FileOperationErro
 from src.error_handling import retry_on_error
 from src.topic_validation import _validate_topic
 from langdetect import detect, DetectorFactory
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
 
 # Для того, щоб результати були стабільними
 DetectorFactory.seed = 0 
@@ -203,12 +210,71 @@ class LangChain1Agent(LoggerMixin):
             except Exception as e:
                 return f"[ERROR] Не вдалося перекласти текст: {e}"
         
+        def plot_wordcloud(text: str) -> str:
+            """
+            Будує "хмару слів" з переданого тексту та зберігає її у файл PNG.
+            Повертає шлях до файлу або повідомлення про помилку.
+            """
+            self.logger.info("plot_wordcloud: виклик з довжиною тексту=%d", len(text or ""))
+
+            try:
+                if not text or not text.strip():
+                    msg = "Порожній текст – нічого візуалізувати."
+                    self.logger.warning("plot_wordcloud: %s", msg)
+                    return msg
+
+                # Трошки чистимо текст і обрізаємо надто довгі
+                cleaned = re.sub(r"\s+", " ", text)
+                cleaned = cleaned[:20000]  # обмеження, щоб не вибухнути в памʼяті
+
+                # Папка для збереження картинок
+                out_dir = Path("wordclouds")
+                out_dir.mkdir(exist_ok=True)
+
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = out_dir / f"wordcloud_{ts}.png"
+
+                # Щоб не було проблем з GUI-бекендом
+                try:
+                    plt.switch_backend("Agg")
+                except Exception:
+                    pass
+
+                # Можеш додати свої стоп-слова
+                stopwords = set([
+                    "i", "в", "на", "та", "що", "это", "для", "а", "як", "до", "від", "з",
+                    "але", "про", "також", "так", "чи", "щоб", "тому", "тому що", "тому щоб", "тому щоб"
+                ])
+
+                wc = WordCloud(
+                    width=1200,
+                    height=800,
+                    background_color="white",
+                    stopwords=stopwords
+                ).generate(cleaned)
+
+                plt.figure(figsize=(8, 5))
+                plt.imshow(wc, interpolation="bilinear")
+                plt.axis("off")
+                plt.tight_layout(pad=0)
+
+                plt.savefig(filename, dpi=200, bbox_inches="tight")
+                plt.close()
+
+                self.logger.info("plot_wordcloud: успішно збережено у файл %s", filename)
+                return f"Хмару слів збережено у файл: {filename}"
+
+            except Exception as e:
+                self.logger.exception("Помилка в plot_wordcloud")
+                return f"[ERROR] Не вдалося побудувати хмару слів: {e}"
+
         return {
             "search_web": search_web,
             "analyze_data": analyze_data,
             "save_to_memory": save_to_memory,   
             "detect_language": detect_language,
-            "translate_text": translate_text
+            "translate_text": translate_text,  
+            "plot_wordcloud": plot_wordcloud
         }
     
     def _create_chains(self):
@@ -324,6 +390,24 @@ class LangChain1Agent(LoggerMixin):
             except Exception as e:
                 self.logger.warning(f"Помилка збереження: {e}")
             
+            # Крок 7: Побудова хмари слів
+            self.logger.info("Крок 7: Побудова хмари слів...")
+            try:
+                wordcloud = self.tools["plot_wordcloud"](results["ai_analysis"])
+                results["wordcloud"] = wordcloud
+                self.logger.info(f"Крок 7 завершено: {wordcloud}")
+            except Exception as e:
+                self.logger.warning(f"Помилка побудови хмари слів: {e}")
+                
+            # Крок 8: Збереження хмари слів
+            self.logger.info("Крок 8: Збереження хмари слів...")
+            try:
+                with open("wordcloud.png", "w", encoding="utf-8") as f:
+                    json.dump(results, f, ensure_ascii=False, indent=2)
+                self.logger.info("Крок 8: завершено та збережено хмару слів: wordcloud.png")
+            except Exception as e:
+                self.logger.error(f"Помилка збереження хмари слів: {e}", exc_info=True)
+
             # Створення звіту
             report = self._create_report(results)
             results["report"] = report
