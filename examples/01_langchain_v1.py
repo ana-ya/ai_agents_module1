@@ -17,6 +17,11 @@ from src import setup_logging, get_logger, LoggerMixin
 from src.exceptions import APIKeyError, ModelError, ToolError, FileOperationError, ResearchError
 from src.error_handling import retry_on_error
 from src.topic_validation import _validate_topic
+from langdetect import detect, DetectorFactory
+
+# Для того, щоб результати були стабільними
+DetectorFactory.seed = 0 
+
 # Setup logging
 logger = setup_logging(level=os.getenv("LOG_LEVEL", "INFO"))
 
@@ -115,8 +120,7 @@ class LangChain1Agent(LoggerMixin):
 
 3. Виклики впровадження AI в освіті
    Основні проблеми: підготовка кадрів, етичні питання, доступність...
-"""
-        
+"""     
         def analyze_data(text: str) -> str:
             """Аналіз даних"""
             word_count = len(text.split())
@@ -161,10 +165,50 @@ class LangChain1Agent(LoggerMixin):
             except Exception as e:
                 raise FileOperationError(f"Не вдалося зберегти дані: {e}") from e
         
+        def detect_language(text: str) -> str:
+            """
+            Визначає мову тексту. Повертає ISO-код (наприклад 'en', 'uk', 'ru').
+            """
+            try:
+                if not text.strip():
+                    return "Порожній текст – неможливо визначити мову."
+
+                lang = detect(text)
+                return f"Мова тексту: {lang}"
+            except Exception as e:
+                return f"[ERROR] Не вдалося визначити мову: {e}"
+
+        def translate_text(text: str, target_lang: str = "en") -> str:
+            """
+            Перекладає текст на target_lang за допомогою LLM (OpenAI або ін.).
+            """
+            try:
+                if not text.strip():
+                    return "Порожній текст – нічого перекладати."
+
+                if not self.llm:
+                    return "[INFO] Переклад недоступний: LLM не ініціалізовано."
+
+                prompt = ChatPromptTemplate.from_template(
+                    "Переклади текст англійською мовою. "
+                    "Зберігай сенс та структуру.\n\n"
+                    "Текст:\n{input_text}"
+                )
+
+                chain = prompt | self.llm
+                result = chain.invoke({"input_text": text})
+
+                return result.content if hasattr(result, "content") else str(result)
+
+            except Exception as e:
+                return f"[ERROR] Не вдалося перекласти текст: {e}"
+        
         return {
             "search_web": search_web,
             "analyze_data": analyze_data,
-            "save_to_memory": save_to_memory
+            "save_to_memory": save_to_memory,   
+            "detect_language": detect_language,
+            "translate_text": translate_text
         }
     
     def _create_chains(self):
@@ -236,18 +280,47 @@ class LangChain1Agent(LoggerMixin):
                     results["ai_analysis"] = ai_analysis
                     self.logger.info("Крок 3 завершено: AI аналіз")
                 except Exception as e:
-                    self.logger.error(f"Помилка AI аналізу: {e}", exc_info=True)
-                    results["ai_analysis"] = "AI аналіз недоступний"
+                    error_message = str(e)
+                    self.logger.warning(
+                        "Помилка AI аналізу (використовую демо-аналіз): %s", error_message, exc_info=True
+                    )
+                    # Часті випадки помилок: ліміт запитів (429), відсутність доступу, тощо.
+                    # У всіх цих випадках повертаємо демо-аналіз, аби користувач отримав результат.
+                    results["ai_analysis"] = self._demo_analysis(topic)
+                    results["ai_analysis_error"] = error_message
             else:
                 self.logger.info("Крок 3: Демо аналіз (LLM недоступний)...")
                 results["ai_analysis"] = self._demo_analysis(topic)
                 self.logger.info("Крок 3 завершено: демо аналіз")
+
+            # Крок 4: Перевірка мови тексту
+            self.logger.info("Крок 4: Перевірка мови тексту...")
+            lang_info = self.tools["detect_language"](results["ai_analysis"])
+            results["language_info"] = lang_info
+            self.logger.info(f"Крок 4 завершено: перевірка мови тексту: {lang_info}")
+
+            # Витягуємо ISO-код мови, якщо це можливо
+            lang_code = lang_info
+            if isinstance(lang_info, str) and ":" in lang_info:
+                lang_code = lang_info.split(":")[-1].strip()
+
+            # Крок 5: Переклад тексту
+            self.logger.info("Крок 5: Переклад тексту...")
+            if lang_code != "en":
+                self.logger.info("Виявлено українську/російську мову → перекладаємо на англійську")
+                translated = self.tools["translate_text"](results["ai_analysis"], "en")
+                results["translated_ai_analysis"] = translated
+            elif lang_code == "en":
+                self.logger.info("Текст вже англійською мовою, переклад не потрібен")
+            else:
+                self.logger.error(f"Не визначено мову тексту: {lang_info}")
+            self.logger.info(f"Крок 5 завершено: переклад тексту")
             
-            # Крок 4: Збереження
-            self.logger.info("Крок 4: Збереження результатів...")
+            # Крок 6: Збереження
+            self.logger.info("Крок 6: Збереження результатів...")
             try:
                 save_result = self.tools["save_to_memory"](results)
-                self.logger.info(f"Крок 4 завершено: {save_result}")
+                self.logger.info(f"Крок 6 завершено: {save_result}")
             except Exception as e:
                 self.logger.warning(f"Помилка збереження: {e}")
             
